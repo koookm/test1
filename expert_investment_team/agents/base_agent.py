@@ -66,38 +66,63 @@ class BaseAgent(ABC):
 
     def _init_anthropic_oauth(self):
         """
-        1안: Anthropic OAuth access token.
+        1안: Anthropic OAuth / API Key 인증.
 
-        토큰 탐색 순서:
-          1) config.anthropic_access_token (ANTHROPIC_ACCESS_TOKEN env)
-          2) Claude Code 세션 토큰 (~/.claude/credentials.json 또는 keyring)
-          3) 없으면 API Key로 자동 fallback
+        ※ Claude Code 웹/원격 환경 주의사항:
+           Claude Code의 내부 세션 토큰(sk-ant-si-...)은 Anthropic Messages API에
+           직접 사용할 수 없습니다. 사용자가 별도의 인증 정보를 제공해야 합니다.
+
+        탐색 순서:
+          1) ANTHROPIC_ACCESS_TOKEN 환경변수 (진짜 OAuth access token)
+          2) ~/.claude/credentials.json (로컬 Claude Code 설치, claudeAiOauth.accessToken)
+          3) ANTHROPIC_API_KEY 환경변수 (일반 API key, fallback)
         """
         try:
             import anthropic
         except ImportError:
             raise ImportError("pip install anthropic")
 
-        access_token = self.config.anthropic_access_token
+        import os
 
-        # Claude Code 로컬 크리덴셜에서 자동 로드 시도
+        # 1) 명시적 OAuth access token (claude.ai에서 발급한 실제 OAuth token)
+        access_token = self.config.anthropic_access_token
         if not access_token:
-            access_token = self._load_claude_code_token()
+            access_token = self._load_claude_code_credentials_token()
+
+        base_url = os.getenv("ANTHROPIC_BASE_URL", "").strip() or None
 
         if access_token:
-            logger.info("Anthropic: OAuth access token 사용")
-            # Anthropic SDK는 api_key 파라미터로 access token도 수용
-            return anthropic.Anthropic(api_key=access_token)
+            logger.info(f"Anthropic OAuth access token 사용")
+            kwargs = {"api_key": access_token}
+            if base_url:
+                kwargs["base_url"] = base_url
+            return anthropic.Anthropic(**kwargs)
 
-        # fallback → API Key
+        # 2) 일반 API Key fallback
         if self.config.anthropic_api_key:
-            logger.info("Anthropic OAuth 토큰 없음 → API Key로 fallback")
-            return anthropic.Anthropic(api_key=self.config.anthropic_api_key)
+            logger.info("Anthropic API Key 사용")
+            kwargs = {"api_key": self.config.anthropic_api_key}
+            if base_url:
+                kwargs["base_url"] = base_url
+            return anthropic.Anthropic(**kwargs)
 
         raise ValueError(
-            "Anthropic 인증 정보 없음.\n"
-            "방법 1 (OAuth): export ANTHROPIC_ACCESS_TOKEN=<Claude Code 토큰>\n"
-            "방법 2 (API Key): export ANTHROPIC_API_KEY=<API 키>"
+            "\n"
+            "═══════════════════════════════════════════════════\n"
+            " Anthropic 인증 정보가 필요합니다\n"
+            "═══════════════════════════════════════════════════\n"
+            " [1안] Anthropic API Key (권장):\n"
+            "   export ANTHROPIC_API_KEY=sk-ant-api...\n"
+            "   발급: https://console.anthropic.com/\n"
+            "\n"
+            " [2안] Google Gemini (무료 티어):\n"
+            "   export GOOGLE_API_KEY=...\n"
+            "   python main.py --provider gemini\n"
+            "   발급: https://aistudio.google.com/app/apikey\n"
+            "═══════════════════════════════════════════════════\n"
+            " ※ Claude Code 세션 토큰(sk-ant-si-)은 내부 전용으로\n"
+            "    Anthropic Messages API에 사용 불가합니다.\n"
+            "═══════════════════════════════════════════════════"
         )
 
     def _init_anthropic_apikey(self):
@@ -146,39 +171,30 @@ class BaseAgent(ABC):
 
         return openai.OpenAI(api_key=self.config.openai_api_key)
 
-    def _load_claude_code_token(self) -> str:
+    def _load_claude_code_credentials_token(self) -> str:
         """
-        Claude Code 로컬 세션에서 OAuth 토큰을 자동 로드합니다.
-        ~/.claude/credentials.json 또는 keyring에서 읽기 시도.
+        로컬 Claude Code 설치 환경에서 OAuth access token 로드.
+        ~/.claude/credentials.json의 claudeAiOauth.accessToken을 읽습니다.
+
+        ※ Claude Code 웹/원격 환경의 세션 토큰(sk-ant-si-)은 여기서 로드하지 않습니다.
+           해당 토큰은 Claude Code 내부 통신 전용이며 Messages API에 사용 불가합니다.
         """
         import json
         from pathlib import Path
 
-        # 방법 1: ~/.claude/credentials.json
         cred_path = Path.home() / ".claude" / "credentials.json"
-        if cred_path.exists():
-            try:
-                creds = json.loads(cred_path.read_text())
-                token = (
-                    creds.get("claudeAiOauth", {}).get("accessToken")
-                    or creds.get("access_token")
-                    or creds.get("oauthToken")
-                )
-                if token:
-                    logger.debug("Claude Code OAuth 토큰 로드: ~/.claude/credentials.json")
-                    return token
-            except Exception as e:
-                logger.debug(f"credentials.json 파싱 실패: {e}")
+        if not cred_path.exists():
+            return ""
 
-        # 방법 2: keyring (선택적)
         try:
-            import keyring
-            token = keyring.get_password("claude-code", "access_token")
-            if token:
-                logger.debug("Claude Code OAuth 토큰 로드: keyring")
+            creds = json.loads(cred_path.read_text())
+            # 로컬 설치의 실제 OAuth access token
+            token = creds.get("claudeAiOauth", {}).get("accessToken", "")
+            if token and not token.startswith("sk-ant-si-"):
+                logger.debug("OAuth token 로드: ~/.claude/credentials.json")
                 return token
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"credentials.json 파싱 실패: {e}")
 
         return ""
 

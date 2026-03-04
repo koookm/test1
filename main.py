@@ -97,17 +97,39 @@ def check_api_keys(config: SystemConfig) -> bool:
     provider = config.llm.provider
 
     if provider == "anthropic_oauth":
-        # OAuth 토큰 또는 API Key 중 하나라도 있으면 OK
+        # OAuth access token 또는 API Key 중 하나라도 있으면 OK
         has_token = bool(config.anthropic_access_token)
         has_key = bool(config.anthropic_api_key)
-        # ~/.claude/credentials.json 존재 여부도 확인
+        # 로컬 Claude Code 설치의 credentials.json 확인
         from pathlib import Path
-        has_creds = (Path.home() / ".claude" / "credentials.json").exists()
-        if not (has_token or has_key or has_creds):
+        import json
+        has_local_oauth = False
+        cred_path = Path.home() / ".claude" / "credentials.json"
+        if cred_path.exists():
+            try:
+                creds = json.loads(cred_path.read_text())
+                token = creds.get("claudeAiOauth", {}).get("accessToken", "")
+                has_local_oauth = bool(token and not token.startswith("sk-ant-si-"))
+            except Exception:
+                pass
+
+        if not (has_token or has_key or has_local_oauth):
             logger.error(
-                "Anthropic 인증 정보 없음. 다음 중 하나를 설정하세요:\n"
-                "  [1안] export ANTHROPIC_ACCESS_TOKEN=<Claude Code OAuth 토큰>\n"
-                "  [fallback] export ANTHROPIC_API_KEY=<API 키>"
+                "\n"
+                "═══════════════════════════════════════════════════\n"
+                " Anthropic 인증 정보가 필요합니다\n"
+                "═══════════════════════════════════════════════════\n"
+                " [방법 1] Anthropic API Key:\n"
+                "   export ANTHROPIC_API_KEY=sk-ant-api...\n"
+                "   발급: https://console.anthropic.com/\n"
+                "\n"
+                " [방법 2] Google Gemini (무료):\n"
+                "   export GOOGLE_API_KEY=...\n"
+                "   python main.py --provider gemini\n"
+                "   발급: https://aistudio.google.com/app/apikey\n"
+                "═══════════════════════════════════════════════════\n"
+                " ※ Claude Code 웹 세션 토큰은 Messages API에 사용 불가\n"
+                "═══════════════════════════════════════════════════"
             )
             return False
 
