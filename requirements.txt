@@ -1,5 +1,9 @@
 # Core LLM & Agent Framework
+# 1안: Anthropic OAuth / API Key
 anthropic>=0.40.0
+# 2안: Google Gemini
+google-genai>=1.0.0
+# 기타
 openai>=1.50.0
 langchain>=0.3.0
 langchain-openai>=0.2.0

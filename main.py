@@ -73,9 +73,15 @@ def parse_args():
     )
     parser.add_argument(
         "--provider",
-        choices=["anthropic", "openai"],
-        default="anthropic",
-        help="LLM provider",
+        choices=["anthropic_oauth", "anthropic", "gemini", "openai"],
+        default="anthropic_oauth",
+        help=(
+            "LLM provider: "
+            "anthropic_oauth (1안, OAuth 토큰, 기본값) | "
+            "anthropic (API Key) | "
+            "gemini (2안, Google Gemini) | "
+            "openai"
+        ),
     )
     parser.add_argument(
         "--output-dir",
@@ -87,19 +93,49 @@ def parse_args():
 
 
 def check_api_keys(config: SystemConfig) -> bool:
-    """Verify required API keys are configured."""
-    if config.llm.provider == "anthropic" and not config.anthropic_api_key:
-        logger.error(
-            "ANTHROPIC_API_KEY not set. Please set it in your environment or .env file:\n"
-            "  export ANTHROPIC_API_KEY=your_key_here"
-        )
-        return False
-    if config.llm.provider == "openai" and not config.openai_api_key:
-        logger.error(
-            "OPENAI_API_KEY not set. Please set it in your environment or .env file:\n"
-            "  export OPENAI_API_KEY=your_key_here"
-        )
-        return False
+    """필요한 인증 정보가 설정되어 있는지 확인."""
+    provider = config.llm.provider
+
+    if provider == "anthropic_oauth":
+        # OAuth 토큰 또는 API Key 중 하나라도 있으면 OK
+        has_token = bool(config.anthropic_access_token)
+        has_key = bool(config.anthropic_api_key)
+        # ~/.claude/credentials.json 존재 여부도 확인
+        from pathlib import Path
+        has_creds = (Path.home() / ".claude" / "credentials.json").exists()
+        if not (has_token or has_key or has_creds):
+            logger.error(
+                "Anthropic 인증 정보 없음. 다음 중 하나를 설정하세요:\n"
+                "  [1안] export ANTHROPIC_ACCESS_TOKEN=<Claude Code OAuth 토큰>\n"
+                "  [fallback] export ANTHROPIC_API_KEY=<API 키>"
+            )
+            return False
+
+    elif provider == "anthropic":
+        if not config.anthropic_api_key:
+            logger.error(
+                "ANTHROPIC_API_KEY가 설정되지 않았습니다:\n"
+                "  export ANTHROPIC_API_KEY=your_key_here"
+            )
+            return False
+
+    elif provider == "gemini":
+        if not config.google_api_key:
+            logger.error(
+                "GOOGLE_API_KEY가 설정되지 않았습니다 (2안 Gemini):\n"
+                "  export GOOGLE_API_KEY=your_key_here\n"
+                "  발급: https://aistudio.google.com/app/apikey"
+            )
+            return False
+
+    elif provider == "openai":
+        if not config.openai_api_key:
+            logger.error(
+                "OPENAI_API_KEY가 설정되지 않았습니다:\n"
+                "  export OPENAI_API_KEY=your_key_here"
+            )
+            return False
+
     return True
 
 
@@ -363,9 +399,21 @@ def main():
     config.output_dir = args.output_dir
     config.agent.use_fine_grained_tasks = not args.coarse
 
+    # Provider별 모델명 설정
     if args.provider == "openai":
         config.llm.model = "gpt-4o"
         config.llm.fast_model = "gpt-4o-mini"
+    elif args.provider == "gemini":
+        # gemini_model / gemini_fast_model 은 LLMConfig에서 관리
+        logger.info(
+            f"Gemini 2안 사용: {config.llm.gemini_model} "
+            f"(fast: {config.llm.gemini_fast_model})"
+        )
+    elif args.provider in ("anthropic_oauth", "anthropic"):
+        logger.info(
+            f"Anthropic 1안({args.provider}) 사용: {config.llm.model} "
+            f"(fast: {config.llm.fast_model})"
+        )
 
     # Select stock universe
     n_stocks = min(args.n_stocks, len(TOPIX100_TICKERS))

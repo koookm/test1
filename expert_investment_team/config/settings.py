@@ -14,13 +14,24 @@ load_dotenv()
 
 @dataclass
 class LLMConfig:
-    """LLM model configuration"""
-    provider: str = "anthropic"  # "openai" | "anthropic"
+    """LLM model configuration
+
+    Provider options:
+      "anthropic_oauth" - Anthropic OAuth access token (Claude Code 계정, 1안 기본값)
+      "anthropic"       - Anthropic API key (ANTHROPIC_API_KEY)
+      "gemini"          - Google Gemini API key (GOOGLE_API_KEY, 2안)
+      "openai"          - OpenAI API key (OPENAI_API_KEY)
+    """
+    provider: str = "anthropic_oauth"   # 1안: OAuth (기본값)
     model: str = "claude-sonnet-4-6"
     temperature: float = 0.1
     max_tokens: int = 4096
-    # Fallback model for cost efficiency
+    # Fallback (저비용 고속 태스크용)
     fast_model: str = "claude-haiku-4-5-20251001"
+
+    # Gemini 모델명 (2안)
+    gemini_model: str = "gemini-2.0-flash"
+    gemini_fast_model: str = "gemini-2.0-flash-lite"
 
 
 @dataclass
@@ -156,7 +167,12 @@ class SystemConfig:
     agent: AgentConfig = field(default_factory=AgentConfig)
 
     # API Keys (loaded from environment)
+    # 1안: Anthropic OAuth (Claude Code 로그인 토큰, ANTHROPIC_ACCESS_TOKEN 자동 감지)
+    anthropic_access_token: str = field(default_factory=lambda: os.getenv("ANTHROPIC_ACCESS_TOKEN", ""))
+    # 일반 API Key (OAuth 없을 때 fallback)
     anthropic_api_key: str = field(default_factory=lambda: os.getenv("ANTHROPIC_API_KEY", ""))
+    # 2안: Google Gemini
+    google_api_key: str = field(default_factory=lambda: os.getenv("GOOGLE_API_KEY", ""))
     openai_api_key: str = field(default_factory=lambda: os.getenv("OPENAI_API_KEY", ""))
     alpha_vantage_key: str = field(default_factory=lambda: os.getenv("ALPHA_VANTAGE_API_KEY", ""))
     fred_api_key: str = field(default_factory=lambda: os.getenv("FRED_API_KEY", ""))
